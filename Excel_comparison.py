@@ -2,81 +2,111 @@ import streamlit as st
 import pandas as pd
 import io
 
-st.set_page_config(layout="wide", page_title="Excel Comparator")
+st.set_page_config(layout="wide", page_title="Excel/CSV Comparator")
 
-st.markdown("<h2 style='text-align:center;'>🔍 Excel File Comparator with Export</h2>", unsafe_allow_html=True)
-st.write("Upload two Excel files to compare and download the difference report.")
+st.markdown("<h2 style='text-align:center;'>🔍 Excel / CSV Comparator with Export</h2>", unsafe_allow_html=True)
+st.write("Upload two files (Excel or CSV) to compare and download the difference report.")
 
-# ----------------------------------------
-# FILE UPLOAD
-# ----------------------------------------
-file1 = st.file_uploader("Upload First Excel File", type=["xlsx"])
-file2 = st.file_uploader("Upload Second Excel File", type=["xlsx"])
+# ------------------------------------------------------
+# Function to read ANY uploaded file (CSV or Excel)
+# ------------------------------------------------------
+def load_file(uploaded_file):
+    if uploaded_file is None:
+        return None, None  # df, sheetnames
+
+    filename = uploaded_file.name.lower()
+
+    if filename.endswith(".csv"):
+        df = pd.read_csv(uploaded_file)
+        return df, None  # CSV has no sheets
+
+    elif filename.endswith(".xlsx"):
+        xls = pd.ExcelFile(uploaded_file)
+        return xls, xls.sheet_names
+
+    else:
+        st.error("Unsupported file type. Upload only CSV or XLSX.")
+        return None, None
+
+
+# ------------------------------------------------------
+# FILE UPLOADS
+# ------------------------------------------------------
+file1 = st.file_uploader("Upload First File (CSV or Excel)", type=["csv", "xlsx"])
+file2 = st.file_uploader("Upload Second File (CSV or Excel)", type=["csv", "xlsx"])
 
 if file1 and file2:
 
-    xls1 = pd.ExcelFile(file1)
-    xls2 = pd.ExcelFile(file2)
+    obj1, sheets1 = load_file(file1)
+    obj2, sheets2 = load_file(file2)
 
-    common_sheets = set(xls1.sheet_names).intersection(xls2.sheet_names)
+    # ------------------------------------------------------
+    # CASE 1: BOTH CSV files
+    # ------------------------------------------------------
+    if isinstance(obj1, pd.DataFrame) and isinstance(obj2, pd.DataFrame):
 
-    if not common_sheets:
-        st.warning("No common sheets found between the two files.")
-        st.stop()
+        st.subheader("📄 Comparing CSV Files (Single Sheet Mode)")
+        df1, df2 = obj1.align(obj2, join="outer", axis=1)
 
-    sheet = st.selectbox("Select Sheet to Compare", list(common_sheets))
+        # Create diff
+        diff = df1.astype(str) + " → " + df2.astype(str)
+        diff = diff.where(df1.ne(df2), "")
 
-    df1 = pd.read_excel(file1, sheet_name=sheet)
-    df2 = pd.read_excel(file2, sheet_name=sheet)
+        st.dataframe(diff)
 
-    st.subheader(f"📄 Comparing Sheet: {sheet}")
+        # Export section
+        csv_buffer = io.StringIO()
+        diff.to_csv(csv_buffer, index=False)
+        st.download_button("⬇ Download CSV Difference Report", csv_buffer.getvalue(),
+                           "difference_report.csv", "text/csv")
 
-    # ----------------------------------------
-    # ALIGN
-    # ----------------------------------------
-    df1, df2 = df1.align(df2, join="outer", axis=1)
+        excel_buffer = io.BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
+            diff.to_excel(writer, sheet_name="Differences", index=False)
 
-    # ----------------------------------------
-    # DIFFERENCE REPORT
-    # ----------------------------------------
-    diff = pd.DataFrame(index=df1.index, columns=df1.columns)
+        st.download_button("⬇ Download Excel Difference Report", excel_buffer.getvalue(),
+                           "difference_report.xlsx",
+                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-    for col in df1.columns:
-        diff[col] = df1[col].astype(str) + " → " + df2[col].astype(str)
-        diff[col] = diff[col].where(df1[col] != df2[col], "")  # show only changed cells
+    # ------------------------------------------------------
+    # CASE 2: BOTH Excel files
+    # ------------------------------------------------------
+    elif sheets1 and sheets2:
 
-    st.subheader("🟥 Differences (Old → New)")
-    st.dataframe(diff)
+        common_sheets = set(sheets1).intersection(sheets2)
 
-    # Rows with differences
-    changed_rows = df1[df1.ne(df2).any(axis=1)]
+        if not common_sheets:
+            st.error("No common sheets found between the two Excel files.")
+            st.stop()
 
-    st.subheader("🔧 Rows That Differ")
-    st.dataframe(changed_rows)
+        sheet = st.selectbox("Select Sheet to Compare", sorted(common_sheets))
 
-    # ----------------------------------------
-    # EXPORT TO CSV
-    # ----------------------------------------
-    csv_buffer = io.StringIO()
-    diff.to_csv(csv_buffer, index=False)
-    st.download_button(
-        "⬇ Download CSV Difference Report",
-        data=csv_buffer.getvalue(),
-        file_name="difference_report.csv",
-        mime="text/csv"
-    )
+        df1 = pd.read_excel(file1, sheet_name=sheet)
+        df2 = pd.read_excel(file2, sheet_name=sheet)
 
-    # ----------------------------------------
-    # EXPORT TO EXCEL
-    # ----------------------------------------
-    excel_buffer = io.BytesIO()
-    with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
-        diff.to_excel(writer, sheet_name="Differences", index=False)
-        changed_rows.to_excel(writer, sheet_name="ChangedRowsOnly", index=False)
+        st.subheader(f"📄 Comparing Excel Sheet: {sheet}")
 
-    st.download_button(
-        "⬇ Download Excel Difference Report",
-        data=excel_buffer.getvalue(),
-        file_name="difference_report.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+        df1, df2 = df1.align(df2, join="outer", axis=1)
+
+        diff = df1.astype(str) + " → " + df2.astype(str)
+        diff = diff.where(df1.ne(df2), "")
+
+        st.dataframe(diff)
+
+        # Export
+        csv_buffer = io.StringIO()
+        diff.to_csv(csv_buffer, index=False)
+
+        st.download_button("⬇ Download CSV Difference Report", csv_buffer.getvalue(),
+                           "difference_report.csv", "text/csv")
+
+        excel_buffer = io.BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
+            diff.to_excel(writer, sheet_name="Differences", index=False)
+
+        st.download_button("⬇ Download Excel Difference Report", excel_buffer.getvalue(),
+                           "difference_report.xlsx",
+                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    else:
+        st.error("You cannot compare CSV with Excel. Upload both files in same format.")
