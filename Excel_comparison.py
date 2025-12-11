@@ -20,8 +20,9 @@ if file1 and file2:
         xls2 = pd.ExcelFile(file2)
     except:
         st.error("Unable to read one of the files. Please upload valid Excel (.xlsx) files.")
+        st.stop()
 
-    # List sheets
+    # List common sheets
     common_sheets = set(xls1.sheet_names).intersection(xls2.sheet_names)
 
     if not common_sheets:
@@ -35,35 +36,35 @@ if file1 and file2:
         st.subheader(f"📄 Comparing Sheet: {sheet}")
 
         # ----------------------------------------
-        # ALIGN DATAFRAMES
+        # ALIGN DATAFRAMES BY COLUMNS
         # ----------------------------------------
         df1, df2 = df1.align(df2, join="outer", axis=1)
 
         # ----------------------------------------
         # FIND DIFFERENCES
-        ----------------------------------------
-        diff = df1.ne(df2)
+        # ----------------------------------------
+        diff_mask = df1.ne(df2)
 
         # Highlight function
         def highlight_changes(val):
-            color = "background-color: #ffdddd" if val else ""
-            return color
+            return "background-color: #ffdddd" if val else ""
 
-        st.subheader("🟥 Cells with Differences Highlighted")
-        st.dataframe(diff.style.applymap(highlight_changes))
+        st.subheader("🟥 Cells with Differences Highlighted (True = Different)")
+        st.dataframe(diff_mask.style.applymap(highlight_changes))
 
         # ----------------------------------------
         # SHOW ORIGINAL VALUES SIDE BY SIDE
-        ----------------------------------------
+        # ----------------------------------------
         st.subheader("📌 Data From File 1")
         st.dataframe(df1)
 
         st.subheader("📌 Data From File 2")
         st.dataframe(df2)
 
-        # Show only changed rows
+        # ----------------------------------------
+        # SHOW ONLY ROWS WITH AT LEAST ONE DIFFERENCE
+        # ----------------------------------------
         changed_rows = df1[df1.ne(df2).any(axis=1)]
 
-        st.subheader("🔧 Rows that differ")
+        st.subheader("🔧 Rows That Differ")
         st.dataframe(changed_rows)
-
